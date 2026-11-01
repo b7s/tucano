@@ -24,49 +24,77 @@ Linux-compatible harness as the container's non-root user into the persistent ho
 ```sh
 # Example: Codex. Pin a package version when deploying reproducibly.
 docker compose exec tucano npm install --prefix /home/node/.local -g @openai/codex
-docker compose exec tucano /home/node/.local/bin/codex login --device-auth
+docker compose exec tucano /home/node/.local/bin/codex login
 ```
 
-Codex agents use Tucano's isolated Codex home, not the default CLI home. Use the exact
-login command shown by **Settings → Models → Sign in** inside a container shell:
+Each harness is a separate CLI installed and signed in **inside the container**,
+under the persistent `tucano-home` volume (`/home/node`). Tucano detects it with
+`which` and reads its own config there — never your host's CLI config. Agents keep
+working across restarts and image rebuilds as long as the volume survives.
+
+Install each one in the container shell:
 
 ```sh
 docker compose exec tucano sh
+
+# inside the container
+npm install -g --prefix /home/node/.local @openai/codex      # Codex
+npm install -g --prefix /home/node/.local @anthropic/claude-code  # Claude Code
+# pi: follow pi.dev install instructions for Linux
 ```
 
-Other harnesses (including OpenCode) can be installed under `/home/node/.local/bin`
-or `/home/node/.opencode/bin`. They must support the container's Linux architecture.
-Sign in there, then refresh Models in Tucano. Do not mount your whole host home or
-copy unverified host binaries into the image. For reproducible deployments, build a
-derived image with a pinned harness version rather than installing it interactively.
+Then sign in. Two paths exist; neither logs into Tucano itself — Tucano reads the
+container's harness accounts when running agents.
 
-### OpenCode sign-in inside Docker
+### Easy path: API key, no browser (recommended)
 
-`opencode auth login` starts an OAuth callback listener inside the container, but your
-browser runs on the host, so the redirect never reaches Docker and OAuth logins hang.
-There are two ways to add access; neither logs into Tucano itself — Tucano reads the
-container's OpenCode accounts when running agents.
-
-**Easy way (API-key providers, no browser):** log in directly inside the container.
-OpenCode prompts for the secret in the terminal:
+Providers that accept a key on the command line or via environment variable can be
+added entirely inside the container, no browser needed:
 
 ```sh
-docker compose exec tucano opencode auth login <provider> --method key
+# Inside the container
+docker compose exec tucano opencode auth login nvidia --method key
+# paste the key when prompted
 ```
 
-Example: `docker compose exec tucano opencode auth login nvidia --method key`. The
-provider's form field appears in the prompt; paste your key and press Enter. Saved in
-`/home/node/.local/share/opencode/opencode.db`, which lives in the persistent
-`tucano-home` volume. Verify with `docker compose exec tucano opencode auth list`.
+Tucano passes the container's environment to each harness CLI, so providers that
+read `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or similar from the environment also work
+by setting those in `compose.yaml`'s `environment` block before starting:
 
-**OAuth providers (OpenAI, etc.):** log in **on the host** (browser flow works there),
-then copy OpenCode v2's credential database into the container:
+```yaml
+environment:
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+```
+
+### OAuth providers (Claude Code, Codex, OpenAI via OpenCode): host login + copy
+
+`opencode auth login`, `claude auth login` and `codex login` start an OAuth callback
+listener inside the container, but your browser runs on the host, so the redirect never
+reaches Docker and the login hangs. Log in **on the host** first (browser flow works
+there), then copy that harness's config into the container's persistent volume:
+
+| Harness | Host config to copy | Container destination |
+|---------|---------------------|-----------------------|
+| OpenCode | `~/.local/share/opencode/opencode.db*` | `/home/node/.local/share/opencode/` |
+| Claude Code | `~/.claude/` | `/home/node/.claude/` |
+| Codex | `~/.codex/` | `/home/node/.codex/` |
+
+Example (OpenCode):
 
 ```sh
 # Host: stop any OpenCode server, then copy the credential DB
 docker compose stop tucano
 docker cp ~/.local/share/opencode/opencode.db* tucano-tucano-1:/home/node/.local/share/opencode/
 docker compose start tucano
+```
+
+Verify inside the container:
+
+```sh
+docker compose exec tucano opencode auth list        # OpenCode
+docker compose exec tucano claude auth status        # Claude Code
+docker compose exec tucano codex login status        # Codex
 ```
 
 OpenCode v2 stores accounts in `~/.local/share/opencode/opencode.db` (XDG default),
