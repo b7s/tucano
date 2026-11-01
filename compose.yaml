@@ -1,0 +1,42 @@
+services:
+  tucano:
+    build: .
+    image: tucano-web:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${TUCANO_WEB_PORT:-7337}:7337"
+    environment:
+      # Heap limit is per Node process; the container limit covers all processes.
+      NODE_OPTIONS: "--max-old-space-size=${TUCANO_HEAP_MB:-384}"
+      PATH: /home/node/.local/bin:/home/node/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+    volumes:
+      - tucano-data:/data
+      - tucano-home:/home/node
+    mem_limit: ${TUCANO_MEMORY:-1g}
+    mem_reservation: 256m
+    cpus: ${TUCANO_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:7337/').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  tucano-data:
+  tucano-home:

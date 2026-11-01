@@ -1,0 +1,11 @@
+**/node_modules
+.git
+.env
+.env.*
+out
+dist
+screens*
+*.log
+.tucano
+data
+backups
